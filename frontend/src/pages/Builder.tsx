@@ -1,293 +1,472 @@
 // src/components/Builder.jsx
 import React, { useEffect, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { StepsList } from '../components/StepsList';
+import axios from 'axios';
+
 import { FileExplorer } from '../components/FileExplorer';
-import { TabView } from '../components/TabView';
 import { CodeEditor } from '../components/CodeEditor';
 import { PreviewFrame } from '../components/PreviewFrame';
+import Terminal from '../components/terminal';
+import { Loader } from '../components/Loader';
+import { TabView } from '../components/TabView';
+
+import { useWebContainer } from '../hooks/useWebContainer';
 import { Step, FileItem, StepType } from '../types';
-import axios from 'axios';
 import { BACKEND_URL } from '../config';
 import { parseXml } from '../steps';
-import { useWebContainer } from '../hooks/useWebContainer';
-import { FileNode } from '@webcontainer/api';
-import { Loader } from '../components/Loader';
-import Terminal from '../components/terminal';
 
-const MOCK_FILE_CONTENT = `// This is a sample file content
-import React from 'react';
+// Icons
+import { FaMobileAlt, FaDesktop, FaGithub } from 'react-icons/fa'; // Added FaGithub
+import { SiSupabase, SiNetlify } from 'react-icons/si'; // Added SiSupabase and SiNetlify
 
-function Component() {
-  return <div>Hello World</div>;
+/* -----------------------------
+   Chat Bubble
+----------------------------- */
+function ChatBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
+  const isUser = role === 'user';
+  return (
+    <div className={`mb-3 flex ${isUser ? 'justify-end' : 'justify-start'}`}>
+      <div
+        className={`max-w-[70%] px-4 py-2 rounded-lg text-white whitespace-pre-wrap break-words ${
+          isUser ? 'bg-blue-600' : 'bg-gray-700'
+        }`}
+        style={{ lineHeight: '1.6' }}
+        dangerouslySetInnerHTML={{ __html: content.replace(/\n/g, '<br/>') }}
+      />
+    </div>
+  );
 }
 
-export default Component;`;
+/* -----------------------------
+   Summarize newly-created files 
+   in numeric points
+----------------------------- */
+function createNumberedFileList(newSteps: Step[]): string {
+  // Filter only CreateFile steps that have a valid path
+  const created = newSteps.filter(
+    (st) => st.type === StepType.CreateFile && st.path
+  );
+
+  if (!created.length) {
+    return 'No new files created. Anything else you want to do?';
+  }
+
+  // Build a numeric list
+  const lines = created.map((step, i) => `${i + 1}) Created ${step.path}`);
+  lines.push('All set! Anything else you\'d like to do?');
+  return lines.join('\n');
+}
 
 export function Builder() {
   const location = useLocation();
   const { prompt } = location.state as { prompt: string };
-  const [userPrompt, setPrompt] = useState("");
-  const [llmMessages, setLlmMessages] = useState<{ role: "user" | "assistant", content: string; }[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [templateSet, setTemplateSet] = useState(false);
-  const webcontainer = useWebContainer();
 
-  const [currentStep, setCurrentStep] = useState(1);
-  const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
+  // Chat messages
+  type ChatMsg = {
+    role: 'user' | 'assistant';
+    content: string;
+  };
+  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
+    { role: 'user', content: prompt }
+  ]);
+
+  // Loading spinner (model is thinking)
+  const [loading, setLoading] = useState(false);
+
+  // Steps array (for file creation in background)
+  const [steps, setSteps] = useState<Step[]>([]);
+
+  // User input
+  const [userPrompt, setUserPrompt] = useState('');
+
+  // Files for code editor
+  const [files, setFiles] = useState<FileItem[]>([]);
   const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
 
-  const [steps, setSteps] = useState<Step[]>([]);
-  const [files, setFiles] = useState<FileItem[]>([]);
+  // Tab states
+  const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
+  const [previewMode, setPreviewMode] = useState<'mobile' | 'web'>('web');
 
+  // Terminal
+  const [terminals, setTerminals] = useState([0]);
+  const addTerminal = () => setTerminals((prev) => [...prev, prev.length]);
+
+  // WebContainer
+  const webcontainer = useWebContainer();
+
+  /* ------------------------------------------------------
+   * 1) Steps => update files
+   * ------------------------------------------------------ */
   useEffect(() => {
-    let originalFiles = [...files];
-    let updateHappened = false;
-    steps.filter(({ status }) => status === "pending").forEach(step => {
-      updateHappened = true;
-      if (step?.type === StepType.CreateFile) {
-        let parsedPath = step.path?.split("/") ?? []; // ["src", "components", "App.tsx"]
-        let currentFileStructure = [...originalFiles]; // {}
-        let finalAnswerRef = currentFileStructure;
+    let updated = false;
+    const newFiles = [...files];
 
-        let currentFolder = ""
-        while (parsedPath.length) {
-          currentFolder = `${currentFolder}/${parsedPath[0]}`;
-          let currentFolderName = parsedPath[0];
-          parsedPath = parsedPath.slice(1);
+    // For each pending step, create files
+    steps
+      .filter((s) => s.status === 'pending')
+      .forEach((step) => {
+        updated = true;
 
-          if (!parsedPath.length) {
-            // final file
-            let file = currentFileStructure.find(x => x.path === currentFolder)
-            if (!file) {
-              currentFileStructure.push({
-                name: currentFolderName,
-                type: 'file',
-                path: currentFolder,
-                content: step.code
-              })
+        if (step.type === StepType.CreateFile && step.path) {
+          const parsed = step.path.split('/');
+          let current = newFiles;
+          let currPath = '';
+
+          while (parsed.length) {
+            currPath += `/${parsed[0]}`;
+            const folderName = parsed[0];
+            parsed.shift();
+
+            if (!parsed.length) {
+              // final is a file
+              const existingFile = current.find((f) => f.path === currPath);
+              if (!existingFile) {
+                current.push({
+                  name: folderName,
+                  type: 'file',
+                  path: currPath,
+                  content: step.code || ''
+                });
+              } else {
+                existingFile.content = step.code || '';
+              }
             } else {
-              file.content = step.code;
+              // folder
+              let folder = current.find((f) => f.path === currPath);
+              if (!folder) {
+                folder = {
+                  name: folderName,
+                  type: 'folder',
+                  path: currPath,
+                  children: []
+                };
+                current.push(folder);
+              }
+              current = folder.children!;
             }
-          } else {
-            /// in a folder
-            let folder = currentFileStructure.find(x => x.path === currentFolder)
-            if (!folder) {
-              // create the folder
-              currentFileStructure.push({
-                name: currentFolderName,
-                type: 'folder',
-                path: currentFolder,
-                children: []
-              })
-            }
-
-            currentFileStructure = currentFileStructure.find(x => x.path === currentFolder)!.children!;
           }
         }
-        originalFiles = finalAnswerRef;
-      }
 
-    })
+        step.status = 'completed';
+      });
 
-    if (updateHappened) {
-      setFiles(originalFiles)
-      setSteps(steps => steps.map((s: Step) => ({
-        ...s,
-        status: "completed"
-      })))
+    if (updated) {
+      setFiles(newFiles);
+      setSteps([...steps]); // force re-render
     }
-    console.log(files);
   }, [steps, files]);
 
+  /* ------------------------------------------------------
+   * 2) Mount in WebContainer
+   * ------------------------------------------------------ */
   useEffect(() => {
-    const createMountStructure = (files: FileItem[]): Record<string, any> => {
-      const mountStructure: Record<string, any> = {};
+    if (!webcontainer) return;
 
-      const processFile = (file: FileItem, isRootFolder: boolean) => {
-        if (file.type === 'folder') {
-          // For folders, create a directory entry
-          mountStructure[file.name] = {
-            directory: file.children ?
-              Object.fromEntries(
-                file.children.map(child => [child.name, processFile(child, false)])
-              )
+    const createMountStructure = (items: FileItem[]) => {
+      const struct: Record<string, any> = {};
+
+      const processItem = (item: FileItem, isRoot: boolean) => {
+        if (item.type === 'folder') {
+          struct[item.name] = {
+            directory: item.children
+              ? Object.fromEntries(
+                  item.children.map((c) => [c.name, processItem(c, false)])
+                )
               : {}
           };
-        } else if (file.type === 'file') {
-          if (isRootFolder) {
-            mountStructure[file.name] = {
-              file: {
-                contents: file.content || ''
-              }
-            };
+          return struct[item.name];
+        } else {
+          // file
+          if (isRoot) {
+            struct[item.name] = { file: { contents: item.content || '' } };
           } else {
-            // For files, create a file entry with contents
-            return {
-              file: {
-                contents: file.content || ''
-              }
-            };
+            return { file: { contents: item.content || '' } };
           }
         }
-
-        return mountStructure[file.name];
       };
 
-      // Process each top-level file/folder
-      files.forEach(file => processFile(file, true));
-
-      return mountStructure;
+      items.forEach((x) => processItem(x, true));
+      return struct;
     };
 
-    const mountStructure = createMountStructure(files);
-
-    // Mount the structure if WebContainer is available
-    console.log(mountStructure);
-    webcontainer?.mount(mountStructure);
+    webcontainer.mount(createMountStructure(files));
   }, [files, webcontainer]);
 
-  const handleCodeChange = (path: string, newContent: string) => {
-    setFiles((prevFiles) =>
-      prevFiles.map((file) =>
-        file.path === path
-          ? { ...file, content: newContent }
-          : file
-      )
-    );
-  };
+  /* ------------------------------------------------------
+   * 3) On first mount, call template => parse => call LLM => parse => reply
+   * ------------------------------------------------------ */
+  useEffect(() => {
+    async function init() {
+      setLoading(true);
 
-  async function init() {
-    const response = await axios.post(`${BACKEND_URL}/template`, {
-      prompt: prompt.trim()
-    });
-    setTemplateSet(true);
+      try {
+        // 1) Call template
+        const response = await axios.post(`${BACKEND_URL}/template`, {
+          prompt: prompt.trim()
+        });
+        const { prompts, uiPrompts } = response.data;
 
-    const { prompts, uiPrompts } = response.data;
+        // 2) Parse initial steps from UI prompt
+        const initSteps = parseXml(uiPrompts[0]).map((st) => ({
+          ...st,
+          status: 'pending' as const
+        }));
+        setSteps(initSteps);
 
-    setSteps(parseXml(uiPrompts[0]).map((x: Step) => ({
-      ...x,
-      status: "pending"
-    })));
+        // 3) Call LLM with "prompts" + final user prompt
+        const chatRes = await axios.post(`${BACKEND_URL}/chat`, {
+          messages: [...prompts, prompt].map((c) => ({ role: 'user', content: c }))
+        });
+
+        // 4) Parse new steps from LLM
+        const newSteps = parseXml(chatRes.data.response).map((st) => ({
+          ...st,
+          status: 'pending' as const
+        }));
+        setSteps((prev) => [...prev, ...newSteps]);
+
+        // 5) Summarize newly created files (no undefined) with numeric points
+        const replyText = createNumberedFileList(newSteps);
+        await streamChatMessages([replyText]);
+
+      } catch (error) {
+        console.error('Initialization Error:', error);
+        setChatMessages((prev) => [...prev, { role: 'assistant', content: 'An error occurred during initialization. Please try again.' }]);
+      }
+
+      setLoading(false);
+    }
+    init();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* ------------------------------------------------------
+   * 4) Handle user sending a message
+   * ------------------------------------------------------ */
+  async function handleSend() {
+    if (!userPrompt.trim()) return;
+
+    // user message
+    const userMsg = { role: 'user', content: userPrompt };
+    setChatMessages((prev) => [...prev, userMsg]);
+    setUserPrompt('');
 
     setLoading(true);
-    const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
-      messages: [...prompts, prompt].map(content => ({
-        role: "user",
-        content
-      }))
-    })
+    try {
+      // call LLM
+      const chatResp = await axios.post(`${BACKEND_URL}/chat`, {
+        messages: [...chatMessages, userMsg]
+      });
 
+      // parse steps
+      const parsed = parseXml(chatResp.data.response).map((st) => ({
+        ...st,
+        status: 'pending' as const
+      }));
+      setSteps((prev) => [...prev, ...parsed]);
+
+      // Summarize
+      const reply = createNumberedFileList(parsed);
+      await streamChatMessages([reply]);
+
+    } catch (error) {
+      console.error('Chat Error:', error);
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: 'An error occurred while processing your request. Please try again.' }]);
+    }
     setLoading(false);
-
-    setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
-      ...x,
-      status: "pending" as "pending"
-    }))]);
-
-    setLlmMessages([...prompts, prompt].map(content => ({
-      role: "user",
-      content
-    })));
-
-    setLlmMessages(x => [...x, { role: "assistant", content: stepsResponse.data.response }])
   }
 
-  useEffect(() => {
-    init();
-  }, [])
+  /* ------------------------------------------------------
+   * 5) Stream chat messages one by one with delay
+   * ------------------------------------------------------ */
+  async function streamChatMessages(messages: string[], delayMs = 1000) {
+    for (let msg of messages) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+      setChatMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
+    }
+  }
 
+  /* ------------------------------------------------------
+   * 6) Placeholder Functions for New Buttons
+   * ------------------------------------------------------ */
+  function createRepository() { // Renamed for clarity
+    alert('Creating a new Git repository... (placeholder)');
+  }
+
+  function connectToSupabase() { // New function
+    alert('Connecting to Supabase... (placeholder)');
+  }
+
+  function deployToNetlify() { // New function
+    alert('Deploying to Netlify... (placeholder)');
+  }
+
+  /* ------------------------------------------------------
+   * 7) Render
+   * ------------------------------------------------------ */
   return (
-    <div className="min-h-screen bg-[#1e1e1e] flex flex-col font-poppins">
-      <header className="bg-[#007acc] border-b border-gray-700 px-6 py-4 flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-gray-100">CodeForge</h1> {/* Updated Title */}
-        <p className="text-sm text-gray-300">Prompt: {prompt}</p>
+    <div className="min-h-screen bg-gradient-to-br from-[#1e293b] to-[#0f172a] flex flex-col font-poppins">
+      {/* HEADER */}
+      <header className="bg-gradient-to-r from-blue-500 to-purple-600 px-6 py-4 flex items-center justify-between shadow-lg">
+        <h1 className="text-2xl font-bold text-white">CodeForge</h1>
+        {/* Buttons Container */}
+        <div className="flex space-x-2">
+          {/* Create Repository Button */}
+          <button
+            onClick={createRepository}
+            className="flex items-center bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded shadow transition duration-200"
+          >
+            <FaGithub className="mr-2" /> {/* GitHub Icon */}
+            Create Repository
+          </button>
+          {/* Connect to Supabase Button */}
+          <button
+            onClick={connectToSupabase}
+            className="flex items-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded shadow transition duration-200"
+          >
+            <SiSupabase className="mr-2" /> {/* Supabase Icon */}
+            Connect to Supabase
+          </button>
+          {/* Deploy to Netlify Button */}
+          <button
+            onClick={deployToNetlify}
+            className="flex items-center bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded shadow transition duration-200"
+          >
+            <SiNetlify className="mr-2" /> {/* Netlify Icon */}
+            Deploy to Netlify
+          </button>
+        </div>
       </header>
 
-      <div className="flex-1 overflow-hidden">
-        {/* Adjusted Grid Columns from 5 to 6 */}
-        <div className="h-full grid grid-cols-6 gap-4 p-4">
-          {/* Steps List */}
-          <div className="col-span-1 space-y-4 overflow-auto bg-[#252526] rounded-lg p-3 shadow-lg">
-            <div className="max-h-[75vh] overflow-y-auto">
-              <StepsList
-                steps={steps}
-                currentStep={currentStep}
-                onStepClick={setCurrentStep}
-              />
+      <div className="flex-1 flex overflow-hidden">
+        {/* Chat Section */}
+        <div className="w-96 bg-[#1e1e2e] border-r border-gray-700 flex flex-col">
+          <div className="flex-1 overflow-auto p-4">
+            {chatMessages.map((msg, i) => (
+              <ChatBubble key={i} role={msg.role} content={msg.content} />
+            ))}
+            {loading && <Loader />}
+          </div>
+          <div className="p-4 border-t border-gray-700">
+            <textarea
+              rows={2}
+              className="p-2 w-full bg-[#1e1e2e] text-gray-100 rounded border border-gray-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              placeholder="Anything else?"
+              value={userPrompt}
+              onChange={(e) => setUserPrompt(e.target.value)}
+            />
+            <button
+              onClick={handleSend}
+              className="mt-2 bg-gradient-to-r from-blue-500 to-purple-600 text-white px-4 py-2 rounded hover:shadow-lg transition duration-200 w-full"
+            >
+              Send
+            </button>
+          </div>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 flex flex-col bg-[#0f172a]">
+          <div className="flex flex-1 overflow-hidden">
+            {/* File Explorer */}
+            <div
+              className={`w-64 bg-[#1e293b] border-r border-gray-700 p-4 overflow-auto ${
+                activeTab === 'preview' ? 'hidden' : 'block'
+              }`}
+            >
+              <FileExplorer files={files} onFileSelect={setSelectedFile} />
             </div>
-            <div className="mt-4">
-              <div className='flex flex-col space-y-2'>
-                {(loading || !templateSet) && <Loader />}
-                {!(loading || !templateSet) && (
-                  <>
-                    <textarea
-                      value={userPrompt}
-                      onChange={(e) => setPrompt(e.target.value)}
-                      className='p-2 w-full bg-[#1e1e1e] text-gray-100 rounded border border-gray-700 focus:outline-none focus:ring-2 focus:ring-blue-500'
-                      placeholder="Enter your prompt here..."
-                      rows={3}
-                    ></textarea>
-                    <button
-                      onClick={async () => {
-                        const newMessage = {
-                          role: "user" as "user",
-                          content: userPrompt
-                        };
 
-                        setLoading(true);
-                        const stepsResponse = await axios.post(`${BACKEND_URL}/chat`, {
-                          messages: [...llmMessages, newMessage]
-                        });
-                        setLoading(false);
+            {/* Code Editor or Preview */}
+            <div className="flex-1 p-4 flex flex-col">
+              <TabView activeTab={activeTab} onTabChange={setActiveTab} />
 
-                        setLlmMessages(x => [...x, newMessage, {
-                          role: "assistant",
-                          content: stepsResponse.data.response
-                        }]);
+              {activeTab === 'preview' && (
+                <div className="flex items-center space-x-4 mb-2">
+                  <button
+                    onClick={() => setPreviewMode('mobile')}
+                    className={`inline-flex items-center px-3 py-1 border rounded ${
+                      previewMode === 'mobile'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                  >
+                    <FaMobileAlt className="mr-2" />
+                    Mobile
+                  </button>
+                  <button
+                    onClick={() => setPreviewMode('web')}
+                    className={`inline-flex items-center px-3 py-1 border rounded ${
+                      previewMode === 'web'
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-gray-800 text-gray-300 hover:bg-gray-700'
+                    }`}
+                  >
+                    <FaDesktop className="mr-2" />
+                    Web
+                  </button>
+                  {/* Removed the Deploy to Git button from here */}
+                </div>
+              )}
 
-                        setSteps(s => [...s, ...parseXml(stepsResponse.data.response).map(x => ({
-                          ...x,
-                          status: "pending" as "pending"
-                        }))]);
-
-                        setPrompt(""); // Clear input after sending
-                      }}
-                      className='bg-[#007acc] text-white px-4 py-2 rounded hover:bg-[#005a9e] transition duration-200'
-                    >
-                      Send
-                    </button>
-                  </>
+              <div className="flex-1 overflow-auto mt-2 bg-[#121212] rounded">
+                {activeTab === 'code' ? (
+                  <CodeEditor
+                    file={selectedFile}
+                    onCodeChange={(path, newContent) => {
+                      setFiles((prev) =>
+                        prev.map((f) =>
+                          f.path === path ? { ...f, content: newContent } : f
+                        )
+                      );
+                    }}
+                  />
+                ) : (
+                  <div className="flex justify-center items-center w-full h-full overflow-auto">
+                    {loading ? (
+                      <div className="text-gray-400 animate-pulse">
+                        <p>Loading Preview...</p>
+                      </div>
+                    ) : previewMode === 'mobile' ? (
+                      <div
+                        className="border border-gray-600 rounded shadow-lg overflow-hidden"
+                        style={{ width: '375px', height: '667px' }}
+                      >
+                        <PreviewFrame webContainer={webcontainer} files={files} />
+                      </div>
+                    ) : (
+                      <div
+                        className="border border-gray-600 rounded shadow-lg overflow-hidden"
+                        style={{ width: '960px', height: '540px' }}
+                      >
+                        <PreviewFrame webContainer={webcontainer} files={files} />
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* File Explorer */}
-          <div className="col-span-1 bg-[#252526] rounded-lg shadow-lg p-2 overflow-auto"> {/* Further reduced padding for narrower width */}
-            <FileExplorer
-              files={files}
-              onFileSelect={setSelectedFile}
-            />
-          </div>
-
-          {/* Code Editor & Preview */}
-          <div className="col-span-4 bg-[#1e1e1e] rounded-lg shadow-lg p-4 flex flex-col">
-            {/* Tab View */}
-            <TabView activeTab={activeTab} onTabChange={setActiveTab} />
-
-            {/* Content Area */}
-            <div className="flex-1 overflow-auto bg-[#1e1e1e] rounded mt-2">
-              {activeTab === 'code' ? (
-                <CodeEditor file={selectedFile} onCodeChange={handleCodeChange} />
-              ) : (
-                <PreviewFrame webContainer={webcontainer} files={files} />
-              )}
+          {/* Terminal Section */}
+          <div className="h-64 bg-[#1e1e2e] p-4 border-t border-gray-700">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-white font-bold">Terminal</span>
+              <button
+                className="text-white border border-gray-500 rounded px-2 py-1 hover:bg-gray-700 transition"
+                onClick={addTerminal}
+              >
+                +
+              </button>
             </div>
-
-            {/* Terminal */}
-            <div className="mt-4 bg-[#1e1e1e] rounded p-2 border-t border-gray-700 h-40 overflow-hidden">
-              <Terminal />
+            <div className="h-full overflow-x-auto flex space-x-4">
+              {terminals.map((tid) => (
+                <div
+                  key={tid}
+                  className="flex-shrink-0 w-96 border border-gray-600 rounded bg-[#121212] p-2"
+                >
+                  <Terminal />
+                </div>
+              ))}
             </div>
           </div>
         </div>
