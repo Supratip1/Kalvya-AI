@@ -22,7 +22,7 @@ import { SiSupabase, SiNetlify } from 'react-icons/si'; // Added SiSupabase and 
 /* -----------------------------
    Chat Bubble
 ----------------------------- */
-function ChatBubble({ role, content }: { role: 'user' | 'assistant'; content: string }) {
+function ChatBubble({ role, content }) {
   const isUser = role === 'user';
   return (
     <div className={`mb-3 flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -41,7 +41,7 @@ function ChatBubble({ role, content }: { role: 'user' | 'assistant'; content: st
    Summarize newly-created files 
    in numeric points
 ----------------------------- */
-function createNumberedFileList(newSteps: Step[]): string {
+function createNumberedFileList(newSteps, isInitial) {
   // Filter only CreateFile steps that have a valid path
   const created = newSteps.filter(
     (st) => st.type === StepType.CreateFile && st.path
@@ -51,10 +51,15 @@ function createNumberedFileList(newSteps: Step[]): string {
     return 'No new files created. Anything else you want to do?';
   }
 
-  // Build a numeric list
-  const lines = created.map((step, i) => `${i + 1}) Created ${step.path}`);
-  lines.push('All set! Anything else you\'d like to do?');
-  return lines.join('\n');
+  if (isInitial) {
+    // Build a numeric list for the initial summary
+    const lines = created.map((step, i) => `${i + 1}) Created ${step.path}`);
+    lines.push('All set! Anything else you\'d like to do?');
+    return lines.join('\n');
+  } else {
+    // Generic one-liner for subsequent replies
+    return `${created.length} new file(s) created. What would you like to do next?`;
+  }
 }
 
 export function Builder() {
@@ -62,11 +67,7 @@ export function Builder() {
   const { prompt } = location.state as { prompt: string };
 
   // Chat messages
-  type ChatMsg = {
-    role: 'user' | 'assistant';
-    content: string;
-  };
-  const [chatMessages, setChatMessages] = useState<ChatMsg[]>([
+  const [chatMessages, setChatMessages] = useState([
     { role: 'user', content: prompt }
   ]);
 
@@ -74,18 +75,18 @@ export function Builder() {
   const [loading, setLoading] = useState(false);
 
   // Steps array (for file creation in background)
-  const [steps, setSteps] = useState<Step[]>([]);
+  const [steps, setSteps] = useState([]);
 
   // User input
   const [userPrompt, setUserPrompt] = useState('');
 
   // Files for code editor
-  const [files, setFiles] = useState<FileItem[]>([]);
-  const [selectedFile, setSelectedFile] = useState<FileItem | null>(null);
+  const [files, setFiles] = useState([]);
+  const [selectedFile, setSelectedFile] = useState(null);
 
   // Tab states
-  const [activeTab, setActiveTab] = useState<'code' | 'preview'>('code');
-  const [previewMode, setPreviewMode] = useState<'mobile' | 'web'>('web');
+  const [activeTab, setActiveTab] = useState('code');
+  const [previewMode, setPreviewMode] = useState('web');
 
   // Terminal
   const [terminals, setTerminals] = useState([0]);
@@ -93,6 +94,9 @@ export function Builder() {
 
   // WebContainer
   const webcontainer = useWebContainer();
+
+  // Track if initial summary has been sent
+  const [hasSentInitialSummary, setHasSentInitialSummary] = useState(false);
 
   /* ------------------------------------------------------
    * 1) Steps => update files
@@ -142,7 +146,7 @@ export function Builder() {
                 };
                 current.push(folder);
               }
-              current = folder.children!;
+              current = folder.children;
             }
           }
         }
@@ -162,10 +166,10 @@ export function Builder() {
   useEffect(() => {
     if (!webcontainer) return;
 
-    const createMountStructure = (items: FileItem[]) => {
-      const struct: Record<string, any> = {};
+    const createMountStructure = (items) => {
+      const struct = {};
 
-      const processItem = (item: FileItem, isRoot: boolean) => {
+      const processItem = (item, isRoot) => {
         if (item.type === 'folder') {
           struct[item.name] = {
             directory: item.children
@@ -209,7 +213,7 @@ export function Builder() {
         // 2) Parse initial steps from UI prompt
         const initSteps = parseXml(uiPrompts[0]).map((st) => ({
           ...st,
-          status: 'pending' as const
+          status: 'pending'
         }));
         setSteps(initSteps);
 
@@ -221,13 +225,18 @@ export function Builder() {
         // 4) Parse new steps from LLM
         const newSteps = parseXml(chatRes.data.response).map((st) => ({
           ...st,
-          status: 'pending' as const
+          status: 'pending'
         }));
         setSteps((prev) => [...prev, ...newSteps]);
 
         // 5) Summarize newly created files (no undefined) with numeric points
-        const replyText = createNumberedFileList(newSteps);
+        const replyText = createNumberedFileList(newSteps, !hasSentInitialSummary);
         await streamChatMessages([replyText]);
+
+        // If initial summary sent, update the flag
+        if (!hasSentInitialSummary) {
+          setHasSentInitialSummary(true);
+        }
 
       } catch (error) {
         console.error('Initialization Error:', error);
@@ -261,13 +270,18 @@ export function Builder() {
       // parse steps
       const parsed = parseXml(chatResp.data.response).map((st) => ({
         ...st,
-        status: 'pending' as const
+        status: 'pending'
       }));
       setSteps((prev) => [...prev, ...parsed]);
 
       // Summarize
-      const reply = createNumberedFileList(parsed);
+      const reply = createNumberedFileList(parsed, !hasSentInitialSummary);
       await streamChatMessages([reply]);
+
+      // If initial summary sent, update the flag
+      if (!hasSentInitialSummary) {
+        setHasSentInitialSummary(true);
+      }
 
     } catch (error) {
       console.error('Chat Error:', error);
@@ -279,7 +293,7 @@ export function Builder() {
   /* ------------------------------------------------------
    * 5) Stream chat messages one by one with delay
    * ------------------------------------------------------ */
-  async function streamChatMessages(messages: string[], delayMs = 1000) {
+  async function streamChatMessages(messages, delayMs = 1000) {
     for (let msg of messages) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
       setChatMessages((prev) => [...prev, { role: 'assistant', content: msg }]);
@@ -408,7 +422,7 @@ export function Builder() {
                 </div>
               )}
 
-              <div className="flex-1 overflow-auto mt-2 bg-[#121212] rounded">
+              <div className="flex-1 overflow-auto mt-2 bg-[#121212] rounded flex justify-center items-center">
                 {activeTab === 'code' ? (
                   <CodeEditor
                     file={selectedFile}
@@ -421,7 +435,7 @@ export function Builder() {
                     }}
                   />
                 ) : (
-                  <div className="flex justify-center items-center w-full h-full overflow-auto">
+                  <div className="flex justify-center items-center w-full h-full overflow-hidden">
                     {loading ? (
                       <div className="text-gray-400 animate-pulse">
                         <p>Loading Preview...</p>
@@ -429,14 +443,14 @@ export function Builder() {
                     ) : previewMode === 'mobile' ? (
                       <div
                         className="border border-gray-600 rounded shadow-lg overflow-hidden"
-                        style={{ width: '375px', height: '667px' }}
+                        style={{ width: '375px', height: '667px' }} // Fixed size for mobile
                       >
                         <PreviewFrame webContainer={webcontainer} files={files} />
                       </div>
                     ) : (
                       <div
                         className="border border-gray-600 rounded shadow-lg overflow-hidden"
-                        style={{ width: '960px', height: '540px' }}
+                        style={{ width: '960px', height: '540px' }} // Fixed size for web
                       >
                         <PreviewFrame webContainer={webcontainer} files={files} />
                       </div>

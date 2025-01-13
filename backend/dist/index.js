@@ -16,7 +16,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
 const cors_1 = __importDefault(require("cors"));
 const dotenv_1 = __importDefault(require("dotenv"));
-const generative_ai_1 = require("@google/generative-ai");
+const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 // Import your custom prompts and base prompts
 const prompts_1 = require("./prompts");
 const node_1 = require("./defaults/node");
@@ -24,20 +24,21 @@ const react_1 = require("./defaults/react");
 // 1) Load environment variables
 dotenv_1.default.config();
 // 2) Retrieve API key from .env with validation
-const apiKey = process.env.GEMINI_API_KEY || (() => {
-    throw new Error("Missing GEMINI_API_KEY in .env");
+const apiKey = process.env.ANTHROPIC_API_KEY || (() => {
+    throw new Error("Missing ANTHROPIC_API_KEY in .env");
 })();
-// 3) Initialize the Gemini client
-const genAI = new generative_ai_1.GoogleGenerativeAI(apiKey);
-// 4) Grab the generative model (as per official docs)
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-// 5) Initialize Express
+// 3) Initialize the Anthropic client
+const anthropic = new sdk_1.default({
+    apiKey: apiKey,
+    // Optionally, set other configurations here
+});
+// 4) Initialize Express
 const app = (0, express_1.default)();
 app.use((0, cors_1.default)());
 app.use(express_1.default.json());
-// 6) Add a root GET endpoint for testing
+// 5) Add a root GET endpoint for testing
 app.get("/", (req, res) => {
-    res.send("Gemini Express Server is running.");
+    res.send("Anthropic Express Server is running.");
 });
 // --------------------------------------------------------------------
 // Endpoint: /template
@@ -53,16 +54,25 @@ app.post("/template", (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.status(400).json({ error: "Missing or invalid 'prompt' in request body" });
             return;
         }
-        // System instruction to guide Gemini's response
+        // System instruction to guide Anthropic's response
         const systemInstruction = "Return either 'node' or 'react' based on what you think this project should be. " +
             "Only return a single word: either 'node' or 'react'. Do not return anything extra.";
         // Combine system instruction and user prompt into a single string
         const fullPrompt = `${systemInstruction}\n\n${prompt}`;
-        console.log("Full prompt sent to Gemini:", fullPrompt);
+        console.log("Full prompt sent to Anthropic:", fullPrompt);
         // Generate content using the combined prompt
-        const result = yield model.generateContent(fullPrompt);
-        const answer = result.response.text().trim().toLowerCase();
-        console.log("Gemini response:", answer);
+        const response = yield anthropic.messages.create({
+            messages: [{
+                    role: 'user',
+                    content: fullPrompt
+                }],
+            model: 'claude-3-5-sonnet-20241022', // Ensure this is the correct model name
+            max_tokens: 200,
+            temperature: 0.7, // Adjust as needed
+        });
+        // Extract the answer
+        const answer = response.content[0].text.trim().toLowerCase(); // 'react' or 'node'
+        console.log("Anthropic response:", answer);
         if (answer === "react") {
             console.log("Detected framework: React");
             res.json({
@@ -106,6 +116,7 @@ app.post("/template", (req, res) => __awaiter(void 0, void 0, void 0, function* 
 // --------------------------------------------------------------------
 // Handles chat interactions by accepting an array of messages
 app.post("/chat", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a;
     console.log("Received POST /chat request");
     try {
         const messages = req.body.messages;
@@ -131,11 +142,19 @@ app.post("/chat", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             }
         }).join("\n\n");
         const fullPrompt = `${systemText}\n\n${formattedMessages}`;
-        console.log("Full chat prompt sent to Gemini:", fullPrompt);
+        console.log("Full chat prompt sent to Anthropic:", fullPrompt);
         // Generate content using the combined prompt
-        const result = yield model.generateContent(fullPrompt);
-        const responseText = result.response.text().trim();
-        console.log("Gemini chat response:", responseText);
+        const response = yield anthropic.messages.create({
+            messages: [{
+                    role: 'user',
+                    content: fullPrompt
+                }],
+            model: 'claude-3-5-sonnet-20241022', // Ensure this is the correct model name
+            max_tokens: 8000,
+            temperature: 0.7, // Adjust as needed
+        });
+        const responseText = (_a = response.content[0]) === null || _a === void 0 ? void 0 : _a.text.trim();
+        console.log("Anthropic chat response:", responseText);
         res.json({
             response: responseText || "No response",
         });

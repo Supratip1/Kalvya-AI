@@ -56,7 +56,7 @@ export function Features() {
             Our Features
           </h2>
           <p className="text-lg md:text-xl text-gray-600 dark:text-gray-300">
-            Discover the powerful tools that make Website Builder AI the ultimate platform for your website needs.
+            Discover the powerful tools that make Website CodeForge the ultimate platform for your website needs.
           </p>
         </motion.div>
 

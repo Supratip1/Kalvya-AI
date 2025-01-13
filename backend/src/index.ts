@@ -3,7 +3,8 @@
 import express, { Request, Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Anthropic from "@anthropic-ai/sdk";
+import { TextBlock } from "@anthropic-ai/sdk/resources";
 
 // Import your custom prompts and base prompts
 import { BASE_PROMPT, getSystemPrompt } from "./prompts";
@@ -14,24 +15,24 @@ import { basePrompt as reactBasePrompt } from "./defaults/react";
 dotenv.config();
 
 // 2) Retrieve API key from .env with validation
-const apiKey: string = process.env.GEMINI_API_KEY || (() => {
-  throw new Error("Missing GEMINI_API_KEY in .env");
+const apiKey: string = process.env.ANTHROPIC_API_KEY || (() => {
+  throw new Error("Missing ANTHROPIC_API_KEY in .env");
 })();
 
-// 3) Initialize the Gemini client
-const genAI = new GoogleGenerativeAI(apiKey);
+// 3) Initialize the Anthropic client
+const anthropic = new Anthropic({
+  apiKey: apiKey,
+  // Optionally, set other configurations here
+});
 
-// 4) Grab the generative model (as per official docs)
-const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-
-// 5) Initialize Express
+// 4) Initialize Express
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-// 6) Add a root GET endpoint for testing
+// 5) Add a root GET endpoint for testing
 app.get("/", (req: Request, res: Response): void => {
-  res.send("Gemini Express Server is running.");
+  res.send("Anthropic Express Server is running.");
 });
 
 // --------------------------------------------------------------------
@@ -59,19 +60,29 @@ app.post("/template", async (req: Request, res: Response): Promise<void> => {
       return;
     }
 
-    // System instruction to guide Gemini's response
+    // System instruction to guide Anthropic's response
     const systemInstruction = 
       "Return either 'node' or 'react' based on what you think this project should be. " +
       "Only return a single word: either 'node' or 'react'. Do not return anything extra.";
 
     // Combine system instruction and user prompt into a single string
     const fullPrompt = `${systemInstruction}\n\n${prompt}`;
-    console.log("Full prompt sent to Gemini:", fullPrompt);
+    console.log("Full prompt sent to Anthropic:", fullPrompt);
 
     // Generate content using the combined prompt
-    const result = await model.generateContent(fullPrompt);
-    const answer = result.response.text().trim().toLowerCase();
-    console.log("Gemini response:", answer);
+    const response = await anthropic.messages.create({
+      messages: [{
+        role: 'user',
+        content: fullPrompt
+      }],
+      model: 'claude-3-5-sonnet-20241022', // Ensure this is the correct model name
+      max_tokens: 200,
+      temperature: 0.7, // Adjust as needed
+    });
+
+    // Extract the answer
+    const answer = (response.content[0] as TextBlock).text.trim().toLowerCase(); // 'react' or 'node'
+    console.log("Anthropic response:", answer);
 
     if (answer === "react") {
       console.log("Detected framework: React");
@@ -146,12 +157,21 @@ app.post("/chat", async (req: Request, res: Response): Promise<void> => {
     }).join("\n\n");
 
     const fullPrompt = `${systemText}\n\n${formattedMessages}`;
-    console.log("Full chat prompt sent to Gemini:", fullPrompt);
+    console.log("Full chat prompt sent to Anthropic:", fullPrompt);
 
     // Generate content using the combined prompt
-    const result = await model.generateContent(fullPrompt);
-    const responseText = result.response.text().trim();
-    console.log("Gemini chat response:", responseText);
+    const response = await anthropic.messages.create({
+      messages: [{
+        role: 'user',
+        content: fullPrompt
+      }],
+      model: 'claude-3-5-sonnet-20241022', // Ensure this is the correct model name
+      max_tokens: 8000,
+      temperature: 0.7, // Adjust as needed
+    });
+
+    const responseText = (response.content[0] as TextBlock)?.text.trim();
+    console.log("Anthropic chat response:", responseText);
 
     res.json({
       response: responseText || "No response",
