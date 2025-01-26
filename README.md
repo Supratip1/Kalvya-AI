@@ -1,84 +1,84 @@
-# Kalvya-AI
+# AI Website Builder
 
-Kalvya-AI is an innovative platform that transforms natural language prompts into deployable web applications. By leveraging cutting-edge technologies like React, TypeScript, WebContainers, Node.js, and AI SDK integrations, Kalvya-AI significantly reduces traditional development time and makes web development more accessible.
+AI Website Builder is a platform designed to transform natural language prompts into fully functional and deployable web applications. This project leverages cutting-edge technologies like React, TypeScript, WebContainers, Node.js, and AI integrations to streamline the web development process.
 
 ---
 
 ## Features
 
-- **Natural Language to Web App**: Converts text prompts into functional web applications.
-- **Real-Time Execution**: Powered by WebContainers to enable in-browser runtime for Node.js.
-- **AI-Powered**: Integrates Claude AI SDK for robust natural language processing.
-- **Modern Tech Stack**: Built with React and TypeScript for a seamless, scalable, and maintainable UI.
+- **Natural Language to Web App**: Generate complete web applications using simple text prompts.
+- **Real-Time Execution**: Powered by WebContainers for running Node.js directly in the browser.
+- **AI-Driven**: Utilizes Claude AI SDK for advanced natural language processing.
+- **Modular Architecture**: A clear separation of concerns with distinct backend, frontend, and terminal components.
+
+---
+
+## File Structure
+
+```
+AI-Website-Builder/
+├── backend/               # Node.js backend logic
+│   └── ...                # API and service files
+├── be/node_modules/       # Backend dependencies
+├── frontend/              # React and TypeScript-based frontend
+│   └── ...                # UI components, pages, and assets
+├── terminal-backend/      # Code for handling terminal-like functionality
+├── README.md              # Documentation
+├── package-lock.json      # Dependency lockfile
+```
 
 ---
 
 ## Getting Started
 
 ### Prerequisites
-- **Node.js**: v16+  
-- **npm**: v8+  
-- **Supported Browser**: Chrome/Edge/Brave (WebContainer compatibility)  
+- **Node.js**: v16+
+- **npm**: v8+
+- **Supported Browser**: Chrome or Edge (WebContainer compatibility)
 
 ### Installation
 1. Clone the repository:
    ```bash
-   git clone https://github.com/your-repo/Kalvya-AI.git
-   cd Kalvya-AI
+   git clone https://github.com/your-repo/AI-Website-Builder.git
+   cd AI-Website-Builder
    ```
 
-2. Install dependencies:
+2. Navigate to the backend and frontend directories, and install dependencies:
    ```bash
+   cd backend
+   npm install
+   cd ../frontend
    npm install
    ```
 
-3. Start the development server:
-   ```bash
-   npm start
-   ```
+3. Start both the backend and frontend servers:
+   - Backend:
+     ```bash
+     cd backend
+     npm start
+     ```
+   - Frontend:
+     ```bash
+     cd frontend
+     npm start
+     ```
 
-4. Open your browser and navigate to `http://localhost:3000`.
-
----
-
-## Usage
-
-1. Enter a natural language prompt describing the app you want to create.
-2. The AI processes your input using the Claude AI SDK.
-3. View and interact with the generated application live in your browser.
+4. Open your browser and navigate to the displayed URL.
 
 ---
 
 ## Tech Stack
 
 - **Frontend**: React, TypeScript
-- **Backend**: Node.js
-- **Runtime Environment**: WebContainers (in-browser Node.js execution)
+- **Backend**: Node.js, Express
+- **Runtime Environment**: WebContainers
 - **AI Integration**: Claude AI SDK
-- **Styling**: Tailwind CSS
-
----
-
-## Folder Structure
-
-```
-Kalvya-AI/
-├── src/
-│   ├── components/    # Reusable UI components
-│   ├── pages/         # Application pages
-│   ├── services/      # AI SDK and API integrations
-│   └── styles/        # Global and component-specific styles
-├── public/            # Static assets
-├── package.json       # Project metadata and dependencies
-├── tsconfig.json      # TypeScript configuration
-└── README.md          # Project documentation
-```
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request for any feature suggestions or bug fixes.
+Feel free to contribute! Open an issue or submit a pull request if you have ideas for new features or fixes.
 
 ---
 
@@ -86,11 +86,10 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 
 This project is licensed under the MIT License. See the `LICENSE` file for details.
 
+---
 
 ## Contact
 
-For any questions or feedback, please reach out:  
 **Author**: Supratip Bhattacharya  
 **Email**: supratipbhattacharya2@gmail.com  
-**Portfolio**: [supratip.tech](https://www.supratip.tech)  
-
+**Portfolio**: [supratip.tech](https://www.supratip.tech)
