@@ -1,6 +1,6 @@
-# AI Website Builder
+# Kalvya AI
 
-AI Website Builder is a platform designed to transform natural language prompts into fully functional and deployable web applications. This project leverages cutting-edge technologies like React, TypeScript, WebContainers, Node.js, and AI integrations to streamline the web development process.
+Kalvya AI is a platform designed to transform natural language prompts into fully functional and deployable web applications. This project leverages cutting-edge technologies like React, TypeScript, WebContainers, Node.js, and AI integrations to streamline the web development process.
 
 ---
 
